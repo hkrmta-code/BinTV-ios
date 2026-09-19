@@ -457,8 +457,14 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
                               "session=\(request?.session ?? "-") playerController was nil, presenting again")
             presentPlayerIfNeeded()
         }
-        // Ghi log nếu trước background đang fullscreen nhưng giờ không còn
-        if wasInFullscreenBeforeBackground && !isInFullscreenMode {
+        // Khôi phục fullscreen nếu trước background đang fullscreen
+        if wasInFullscreenBeforeBackground, let controller = playerController {
+            if !isInFullscreenMode {
+                PhimDebugLog.step("NATIVE", "didBecomeActive", "restore_fullscreen",
+                                  "session=\(request?.session ?? "-") re-entering fullscreen")
+                restoreFullscreen(controller: controller)
+            }
+        } else if wasInFullscreenBeforeBackground && !isInFullscreenMode {
             PhimDebugLog.step("NATIVE", "didBecomeActive", "fullscreen_lost",
                               "session=\(request?.session ?? "-") wasInFullscreenBeforeBackground=true but isInFullscreenMode=false — system exited fullscreen on background")
         }
@@ -468,6 +474,39 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
         player.rate = resumeRate
         PhimDebugLog.step("NATIVE", "didBecomeActive", "retained",
                           "session=\(request?.session ?? "-") resumeRate=\(resumeRate) fullscreen=\(isPresented) isInFullscreenMode=\(isInFullscreenMode)")
+    }
+
+    /// Khôi phục fullscreen cho AVPlayerViewController sau khi app quay lại từ background.
+    /// iOS tự động thoát fullscreen khi app vào background; ta dismiss + re-present
+    /// với `entersFullScreenWhenPlaybackBegins = true` để bắt hệ thống vào lại fullscreen.
+    private func restoreFullscreen(controller: AVPlayerViewController) {
+        guard let host = Self.topViewController(),
+              host.presentedViewController === controller else {
+            PhimDebugLog.step("NATIVE", "restore_fullscreen", "FAIL",
+                              "controller not presented or host changed")
+            return
+        }
+        controller.entersFullScreenWhenPlaybackBegins = true
+        // Dismiss và present lại để trigger fullscreen
+        controller.dismiss(animated: false) { [weak self] in
+            guard let self = self,
+                  let player = self.player,
+                  player.currentItem != nil,
+                  let host = Self.topViewController() else { return }
+            let newController = AVPlayerViewController()
+            newController.player = player
+            newController.delegate = self
+            newController.videoGravity = .resizeAspect
+            newController.allowsPictureInPicturePlayback = true
+            newController.modalPresentationStyle = .fullScreen
+            newController.entersFullScreenWhenPlaybackBegins = true
+            newController.view.backgroundColor = .black
+            self.playerController = newController
+            host.present(newController, animated: true) {
+                PhimDebugLog.step("NATIVE", "restore_fullscreen", "ok",
+                                  "re-presented in fullscreen")
+            }
+        }
     }
 
     /// A recreated WKWebView has no memory of the AVPlayer overlay. Re-emit a
