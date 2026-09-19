@@ -461,17 +461,18 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
         if wasInFullscreenBeforeBackground, let controller = playerController {
             if !isInFullscreenMode {
                 PhimDebugLog.step("NATIVE", "didBecomeActive", "restore_fullscreen",
-                                  "session=\(request?.session ?? "-") re-entering fullscreen")
-                restoreFullscreen(controller: controller)
+                                  "session=\(request?.session ?? "-") re-entering fullscreen, resumeRate=\(resumeRate)")
+                restoreFullscreen(controller: controller, resumeRate: resumeRate)
             }
         } else if wasInFullscreenBeforeBackground && !isInFullscreenMode {
             PhimDebugLog.step("NATIVE", "didBecomeActive", "fullscreen_lost",
                               "session=\(request?.session ?? "-") wasInFullscreenBeforeBackground=true but isInFullscreenMode=false — system exited fullscreen on background")
         }
         wasInFullscreenBeforeBackground = false
-        guard resumeRate > 0, let player = player,
-              player.currentItem != nil else { return }
-        player.rate = resumeRate
+        // Resume playback if not handled by restoreFullscreen (i.e., not in fullscreen before background)
+        if resumeRate > 0, let player = player, player.currentItem != nil {
+            player.rate = resumeRate
+        }
         PhimDebugLog.step("NATIVE", "didBecomeActive", "retained",
                           "session=\(request?.session ?? "-") resumeRate=\(resumeRate) fullscreen=\(isPresented) isInFullscreenMode=\(isInFullscreenMode)")
     }
@@ -491,20 +492,33 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
     /// Khôi phục fullscreen cho AVPlayerViewController sau khi app quay lại từ background.
     /// iOS tự động thoát fullscreen khi app vào background; ta dismiss + re-present
     /// với `entersFullScreenWhenPlaybackBegins = true` để bắt hệ thống vào lại fullscreen.
-    private func restoreFullscreen(controller: AVPlayerViewController) {
+    /// Nếu video đang pause (resumeRate == 0), ta phải briefly play→pause để trigger fullscreen.
+    /// Nếu video đang play (resumeRate > 0), ta set rate sau khi present để trigger fullscreen.
+    private func restoreFullscreen(controller: AVPlayerViewController, resumeRate: Float) {
         guard let host = Self.topViewController(),
               host.presentedViewController === controller else {
             PhimDebugLog.step("NATIVE", "restore_fullscreen", "FAIL",
                               "controller not presented or host changed")
+            // Fallback: vẫn resume playback nếu cần
+            if resumeRate > 0, let player = player, player.currentItem != nil {
+                player.rate = resumeRate
+            }
             return
         }
+        let wasPaused = resumeRate <= 0
         controller.entersFullScreenWhenPlaybackBegins = true
         // Dismiss và present lại để trigger fullscreen
         controller.dismiss(animated: false) { [weak self] in
             guard let self = self,
                   let player = self.player,
                   player.currentItem != nil,
-                  let host = Self.topViewController() else { return }
+                  let host = Self.topViewController() else {
+                // Fallback: vẫn resume playback nếu cần
+                if resumeRate > 0, let player = self?.player, player.currentItem != nil {
+                    player.rate = resumeRate
+                }
+                return
+            }
             let newController = AVPlayerViewController()
             newController.player = player
             newController.delegate = self
@@ -516,7 +530,23 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
             self.playerController = newController
             host.present(newController, animated: true) {
                 PhimDebugLog.step("NATIVE", "restore_fullscreen", "ok",
-                                  "re-presented in fullscreen")
+                                  "re-presented in fullscreen, wasPaused=\(wasPaused), resumeRate=\(resumeRate)")
+                // Trigger fullscreen entry:
+                // - Nếu wasPaused: briefly play→pause
+                // - Nếu wasPlaying: set rate (playback begins on this controller)
+                if wasPaused {
+                    newController.player?.play()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        newController.player?.pause()
+                        PhimDebugLog.step("NATIVE", "restore_fullscreen", "pause_after_trigger",
+                                          "paused after fullscreen trigger")
+                    }
+                } else {
+                    // Was playing: set rate to trigger entersFullScreenWhenPlaybackBegins
+                    newController.player?.rate = resumeRate
+                    PhimDebugLog.step("NATIVE", "restore_fullscreen", "resume_playback",
+                                      "rate=\(resumeRate) set to trigger fullscreen")
+                }
             }
         }
     }
