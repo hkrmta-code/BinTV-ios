@@ -469,7 +469,10 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
                               "session=\(request?.session ?? "-") wasInFullscreenBeforeBackground=true but isInFullscreenMode=false — system exited fullscreen on background")
         }
         wasInFullscreenBeforeBackground = false
-        // NOTE: playback resume is now handled inside restoreFullscreen()
+        // Resume playback if not handled by restoreFullscreen (i.e., not in fullscreen before background)
+        if resumeRate > 0, let player = player, player.currentItem != nil {
+            player.rate = resumeRate
+        }
         PhimDebugLog.step("NATIVE", "didBecomeActive", "retained",
                           "session=\(request?.session ?? "-") resumeRate=\(resumeRate) fullscreen=\(isPresented) isInFullscreenMode=\(isInFullscreenMode)")
     }
