@@ -183,10 +183,4 @@ for placeholder, value in [('FIELDS', fields), ('CALLBACKS', callbacks), ('TRANS
 with tempfile.TemporaryDirectory(prefix='bintv-lifecycle-') as directory:
     source = Path(directory) / 'main.swift'
     source.write_text(harness)
-    result = subprocess.run(['swift', str(source)], capture_output=True, text=True)
-    if result.returncode != 0:
-        print("SWIFT STDOUT:")
-        print(result.stdout)
-        print("SWIFT STDERR:")
-        print(result.stderr)
-    result.check_returncode()
+    subprocess.run(['swift', str(source)], check=True)
