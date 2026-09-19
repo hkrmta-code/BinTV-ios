@@ -811,7 +811,7 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
     // PRESENT / DISMISS (UIKit — tìm VC trên cùng để present)
     // =================================================================
 
-    private func presentPlayerIfNeeded() {
+    func presentPlayerIfNeeded() {
         if playerController != nil { return }
         guard let host = Self.topViewController() else {
             PhimDebugLog.step("NATIVE", "present", "FAIL", "không tìm được UIViewController để present")
