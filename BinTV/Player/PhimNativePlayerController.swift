@@ -476,6 +476,18 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
                           "session=\(request?.session ?? "-") resumeRate=\(resumeRate) fullscreen=\(isPresented) isInFullscreenMode=\(isInFullscreenMode)")
     }
 
+    /// A recreated WKWebView has no memory of the AVPlayer overlay. Re-emit a
+    /// state-only callback rather than calling `play` again, so there is one
+    /// source, one AVPlayer, and one presentation controller.
+    func reconcileWebAppState() {
+        guard let current = request, isPresented, let player = player else { return }
+        let seconds = player.currentTime().isNumeric ? max(0, player.currentTime().seconds) : 0
+        let paused = player.rate <= 0 && player.timeControlStatus == .paused
+        PhimDebugLog.step("NATIVE", "reconcileWebState", "ok",
+                          "session=\(current.session) positionMs=\(Int(seconds * 1000)) paused=\(paused)")
+        onStateReconciled?(current, seconds, paused)
+    }
+
     /// Khôi phục fullscreen cho AVPlayerViewController sau khi app quay lại từ background.
     /// iOS tự động thoát fullscreen khi app vào background; ta dismiss + re-present
     /// với `entersFullScreenWhenPlaybackBegins = true` để bắt hệ thống vào lại fullscreen.
@@ -507,18 +519,6 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
                                   "re-presented in fullscreen")
             }
         }
-    }
-
-    /// A recreated WKWebView has no memory of the AVPlayer overlay. Re-emit a
-    /// state-only callback rather than calling `play` again, so there is one
-    /// source, one AVPlayer, and one presentation controller.
-    func reconcileWebAppState() {
-        guard let current = request, isPresented, let player = player else { return }
-        let seconds = player.currentTime().isNumeric ? max(0, player.currentTime().seconds) : 0
-        let paused = player.rate <= 0 && player.timeControlStatus == .paused
-        PhimDebugLog.step("NATIVE", "reconcileWebState", "ok",
-                          "session=\(current.session) positionMs=\(Int(seconds * 1000)) paused=\(paused)")
-        onStateReconciled?(current, seconds, paused)
     }
 
     /// Cập nhật phụ đề cho phiên phát ĐANG CHẠY (app.js gửi khi bật/tắt
