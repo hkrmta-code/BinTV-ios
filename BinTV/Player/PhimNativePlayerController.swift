@@ -158,6 +158,10 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
     private var lifecycleIsSuspended = false
     private var lifecycleResumeRate: Float = 0
     private var lifecycleGeneration = 0
+    /// Theo dõi trạng thái fullscreen của AVPlayerViewController (chế độ toàn màn hình của hệ thống).
+    private var isInFullscreenMode = false
+    /// Lưu trạng thái fullscreen trước khi app vào background để khôi phục/ghi log khi foreground.
+    private var wasInFullscreenBeforeBackground = false
 
     /// Đã báo "bắt đầu phát" cho JS (chỉ 1 lần / phiên).
     private var startedReported = false
@@ -424,9 +428,11 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
         lifecycleResumeRate = player.rate > 0 ? player.rate
             : (player.timeControlStatus == .waitingToPlayAtSpecifiedRate ? 1 : 0)
         shouldPlayWhenReady = lifecycleResumeRate > 0
+        // Lưu trạng thái fullscreen trước khi vào background
+        wasInFullscreenBeforeBackground = isInFullscreenMode
         if lifecycleResumeRate > 0 { player.pause() }
         PhimDebugLog.step("NATIVE", "willResignActive", "retained",
-                          "session=\(request?.session ?? "-") resumeRate=\(lifecycleResumeRate) fullscreen=\(isPresented)")
+                          "session=\(request?.session ?? "-") resumeRate=\(lifecycleResumeRate) fullscreen=\(isPresented) wasInFullscreen=\(wasInFullscreenBeforeBackground)")
     }
 
     func applicationDidEnterBackground() {
@@ -445,11 +451,23 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
         let resumeRate = lifecycleResumeRate
         lifecycleIsSuspended = false
         lifecycleResumeRate = 0
+        // Nếu playerController bị dismiss khi background (hiếm nhưng có thể), present lại
+        if request != nil, playerController == nil, let player = player, player.currentItem != nil {
+            PhimDebugLog.step("NATIVE", "didBecomeActive", "re-present",
+                              "session=\(request?.session ?? "-") playerController was nil, presenting again")
+            presentPlayerIfNeeded()
+        }
+        // Ghi log nếu trước background đang fullscreen nhưng giờ không còn
+        if wasInFullscreenBeforeBackground && !isInFullscreenMode {
+            PhimDebugLog.step("NATIVE", "didBecomeActive", "fullscreen_lost",
+                              "session=\(request?.session ?? "-") wasInFullscreenBeforeBackground=true but isInFullscreenMode=false — system exited fullscreen on background")
+        }
+        wasInFullscreenBeforeBackground = false
         guard resumeRate > 0, let player = player,
               player.currentItem != nil else { return }
         player.rate = resumeRate
         PhimDebugLog.step("NATIVE", "didBecomeActive", "retained",
-                          "session=\(request?.session ?? "-") resumeRate=\(resumeRate) fullscreen=\(isPresented)")
+                          "session=\(request?.session ?? "-") resumeRate=\(resumeRate) fullscreen=\(isPresented) isInFullscreenMode=\(isInFullscreenMode)")
     }
 
     /// A recreated WKWebView has no memory of the AVPlayer overlay. Re-emit a
@@ -876,6 +894,9 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
     func playerViewController(_ playerViewController: AVPlayerViewController,
                               willBeginFullScreenPresentationWithAnimationCoordinator
                               coordinator: UIViewControllerTransitionCoordinator) {
+        isInFullscreenMode = true
+        PhimDebugLog.step("NATIVE", "fullscreen", "begin",
+                          "session=\(request?.session ?? "-")")
         let wasPlaying = (playerViewController.player?.rate ?? 0) > 0
         let item = playerViewController.player?.currentItem
         let generation = lifecycleGeneration
@@ -893,6 +914,9 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
     func playerViewController(_ playerViewController: AVPlayerViewController,
                               willEndFullScreenPresentationWithAnimationCoordinator
                               coordinator: UIViewControllerTransitionCoordinator) {
+        isInFullscreenMode = false
+        PhimDebugLog.step("NATIVE", "fullscreen", "end",
+                          "session=\(request?.session ?? "-")")
         let wasPlaying = (playerViewController.player?.rate ?? 0) > 0
         let item = playerViewController.player?.currentItem
         let generation = lifecycleGeneration
@@ -930,6 +954,9 @@ final class PhimNativePlayerController: NSObject, AVPlayerViewControllerDelegate
         endedGraceWork?.cancel()
         endedGraceWork = nil
         waitingForNextInstruction = false
+        // Reset trạng thái theo dõi fullscreen khi dọn dẹp phiên phát
+        isInFullscreenMode = false
+        wasInFullscreenBeforeBackground = false
         removeSubtitleOverlay()     // [build 232] dọn phụ đề khi đổi/đóng nguồn
         // [build 245] KHÔNG BAO GIỜ để panel danh sách tập sót lại khi dừng /
         // đổi nguồn / đóng player (panel giờ treo trên view gốc của trình phát
