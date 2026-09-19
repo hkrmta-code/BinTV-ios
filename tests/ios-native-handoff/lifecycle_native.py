@@ -64,6 +64,8 @@ final class Native {
     var request: Request? = Request()
     var shouldPlayWhenReady = true
     var isPresented: Bool { playerController != nil }
+    func presentPlayerIfNeeded() {}
+    func restoreFullscreen(controller: AVPlayerViewController) {}
     init() { playerController?.player = player }
 __FIELDS__
 __CALLBACKS__
